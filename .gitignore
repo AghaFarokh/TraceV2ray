@@ -1,0 +1,40 @@
+# Reports
+TraceV2ray_Report_*.txt
+
+# Zip archives
+*.zip
+
+# xray binaries
+xray
+xray.exe
+xray-core
+xray-core.exe
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec.bak
+
+# PyInstaller output
+dist/
+build/
+
+# IDE / tool folders
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+*.DS_Store
+
+# Environment
+.env
+*.env
