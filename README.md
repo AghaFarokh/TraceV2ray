@@ -28,7 +28,6 @@ Download the latest release from the [Releases page](../../releases/latest).
 |------|----------|
 | `TraceV2ray-windows-x64.zip` | Windows 10/11 (64-bit) |
 | `TraceV2ray-macos-arm64.zip` | macOS Apple Silicon (M1 / M2 / M3) |
-| `TraceV2ray-macos-x64.zip` | macOS Intel |
 | `TraceV2ray-linux-x64.zip` | Linux (64-bit) |
 
 Each zip contains `TraceV2ray` (or `TraceV2ray.exe`) and `xray-core` — no installation or Python required.
@@ -58,9 +57,7 @@ The report is saved as `TraceV2ray_Report_YYYYMMDD_HHMMSS.txt` in the same folde
 
 ### macOS
 
-1. Download the correct zip for your Mac:
-   - **Apple Silicon (M1/M2/M3):** `TraceV2ray-macos-arm64.zip`
-   - **Intel Mac:** `TraceV2ray-macos-x64.zip`
+1. Download `TraceV2ray-macos-arm64.zip` (Apple Silicon — M1/M2/M3)
 2. Double-click the zip to extract it. You will see:
    ```
    TraceV2ray

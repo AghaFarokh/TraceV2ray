@@ -31,12 +31,6 @@ jobs:
             xray-asset: Xray-macos-arm64-v8a.zip
             xray-bin: xray
 
-          - os: macos-13
-            artifact-name: TraceV2ray-macos-x64
-            exe-name: TraceV2ray
-            xray-asset: Xray-macos-64.zip
-            xray-bin: xray
-
           - os: ubuntu-latest
             artifact-name: TraceV2ray-linux-x64
             exe-name: TraceV2ray
@@ -158,7 +152,6 @@ jobs:
             |------|----------|
             | `TraceV2ray-windows-x64.zip` | Windows 10/11 (64-bit) |
             | `TraceV2ray-macos-arm64.zip` | macOS Apple Silicon (M1/M2/M3) |
-            | `TraceV2ray-macos-x64.zip` | macOS Intel |
             | `TraceV2ray-linux-x64.zip` | Linux 64-bit |
 
             Each zip contains the `TraceV2ray` executable and `xray-core` bundled together — no install needed.
