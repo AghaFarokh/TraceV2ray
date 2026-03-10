@@ -136,28 +136,14 @@ jobs:
       - name: List artifacts
         run: ls -lh artifacts/
 
-      - name: Delete existing release if present
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ steps.tag.outputs.name }}"
-          RELEASE_ID=$(curl -s \
-            -H "Authorization: token $GITHUB_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG" \
-            | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('id',''))" 2>/dev/null || true)
-          if [ -n "$RELEASE_ID" ]; then
-            echo "Deleting existing release $RELEASE_ID for tag $TAG"
-            curl -s -X DELETE \
-              -H "Authorization: token $GITHUB_TOKEN" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
-          fi
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: TraceV2ray ${{ steps.tag.outputs.name }}
+          # update_existing_release allows re-runs to add missing assets
+          # without wiping the assets already published
+          make_latest: true
           body: |
             ## TraceV2ray ${{ steps.tag.outputs.name }}
 
