@@ -7,7 +7,7 @@
 block_cipher = None
 
 a = Analysis(
-    ['tracev2ray/__main__.py'],
+    ['_entry.py'],
     pathex=[],
     binaries=[],
     datas=[],
