@@ -16,8 +16,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'tkinter', 'unittest', 'email', 'html.parser',
-        'http.server', 'xmlrpc', 'pydoc', 'doctest',
+        'tkinter', 'unittest', 'xmlrpc', 'pydoc', 'doctest',
         'ftplib', 'imaplib', 'smtplib', 'poplib',
         'turtle', 'turtledemo', 'test',
     ],
