@@ -1,0 +1,174 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v2.0.0)'
+        required: true
+        default: 'v2.0.0'
+
+jobs:
+  build:
+    name: Build — ${{ matrix.artifact-name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact-name: TraceV2ray-windows-x64
+            exe-name: TraceV2ray.exe
+            xray-asset: Xray-windows-64.zip
+            xray-bin: xray.exe
+
+          - os: macos-latest
+            artifact-name: TraceV2ray-macos-arm64
+            exe-name: TraceV2ray
+            xray-asset: Xray-macos-arm64-v8a.zip
+            xray-bin: xray
+
+          - os: macos-13
+            artifact-name: TraceV2ray-macos-x64
+            exe-name: TraceV2ray
+            xray-asset: Xray-macos-64.zip
+            xray-bin: xray
+
+          - os: ubuntu-latest
+            artifact-name: TraceV2ray-linux-x64
+            exe-name: TraceV2ray
+            xray-asset: Xray-linux-64.zip
+            xray-bin: xray
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build executable
+        run: pyinstaller build.spec
+
+      - name: Get latest xray-core version
+        id: xray-version
+        shell: bash
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest \
+            | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "xray-core version: $VERSION"
+
+      - name: Download xray-core
+        shell: bash
+        run: |
+          URL="https://github.com/XTLS/Xray-core/releases/download/${{ steps.xray-version.outputs.version }}/${{ matrix.xray-asset }}"
+          curl -L "$URL" -o xray-pkg.zip
+          unzip -o xray-pkg.zip "${{ matrix.xray-bin }}" -d dist/
+
+      - name: Set executable permissions (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x dist/${{ matrix.exe-name }} dist/${{ matrix.xray-bin }}
+
+      - name: Create zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd dist
+          Compress-Archive -Path "${{ matrix.exe-name }}", "${{ matrix.xray-bin }}" `
+            -DestinationPath "../${{ matrix.artifact-name }}.zip"
+
+      - name: Create zip (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd dist
+          zip "../${{ matrix.artifact-name }}.zip" "${{ matrix.exe-name }}" "${{ matrix.xray-bin }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-name }}.zip
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: TraceV2ray ${{ steps.tag.outputs.name }}
+          body: |
+            ## TraceV2ray ${{ steps.tag.outputs.name }}
+
+            Network route diagnostic tool for V2Ray proxy configurations.
+            Traces the full network path — CDN layers, tunnel entry points, exit IPs — and generates a portable report.
+
+            ---
+
+            ### Downloads
+
+            | File | Platform |
+            |------|----------|
+            | `TraceV2ray-windows-x64.zip` | Windows 64-bit |
+            | `TraceV2ray-macos-arm64.zip` | macOS Apple Silicon (M1/M2/M3) |
+            | `TraceV2ray-macos-x64.zip` | macOS Intel |
+            | `TraceV2ray-linux-x64.zip` | Linux 64-bit |
+
+            Each zip contains the `TraceV2ray` executable **and** `xray-core` bundled together — no install needed.
+
+            ---
+
+            ### Usage
+
+            **Windows** — extract zip, then double-click `TraceV2ray.exe` or run:
+            ```
+            TraceV2ray.exe "vless://..."
+            ```
+
+            **macOS / Linux** — extract zip, then:
+            ```bash
+            ./TraceV2ray "vless://..."
+            ```
+
+            The report is saved as `TraceV2ray_Report_YYYYMMDD_HHMMSS.txt` in the current folder.
+            Send this file for support analysis.
+
+            ---
+
+            ### Supported protocols
+            VLESS · VMess · Trojan · Shadowsocks — with TLS, REALITY, WebSocket, gRPC, HTTPUpgrade, KCP, H2
+          files: artifacts/*.zip
+          draft: false
+          prerelease: false
