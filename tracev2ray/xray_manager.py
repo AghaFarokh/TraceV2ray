@@ -186,18 +186,9 @@ def run_connection_test(config: ConfigInfo, entry_ip: str = "", entry_geo: GeoIn
     except Exception as e:
         result.error = f"Connection test failed: {e}"
     finally:
-        # Cleanup
         if process:
-            try:
-                process.terminate()
-                process.wait(timeout=5)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
-
-        if config_file and os.path.exists(config_file.name):
+            _cleanup_process(process)
+        elif config_file and os.path.exists(config_file.name):
             try:
                 os.unlink(config_file.name)
             except Exception:
@@ -406,6 +397,73 @@ def _build_stream_settings(config: ConfigInfo) -> dict:
         stream["security"] = "none"
 
     return stream
+
+
+def start_proxy_session(config: ConfigInfo) -> "subprocess.Popen | None":
+    """Start xray-core and wait for the SOCKS proxy to become ready.
+
+    Returns the Popen process if successful, or None if startup failed.
+    The caller MUST call stop_proxy_session() when done.
+    """
+    xray_path = find_xray_binary()
+    if not xray_path:
+        return None
+
+    try:
+        xray_config = generate_xray_config(config)
+    except Exception:
+        return None
+
+    try:
+        config_file = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", prefix="tracev2ray_", delete=False
+        )
+        json.dump(xray_config, config_file, indent=2)
+        config_file.close()
+        config_file_path = config_file.name
+    except Exception:
+        return None
+
+    process = _start_xray_process(xray_path, config_file_path)
+    process._config_file = config_file_path  # type: ignore
+
+    if not _wait_for_proxy(constants.XRAY_SOCKS_PORT, constants.XRAY_STARTUP_TIMEOUT):
+        _cleanup_process(process)
+        return None
+
+    return process
+
+
+def stop_proxy_session(process: "subprocess.Popen") -> None:
+    """Stop a proxy session started by start_proxy_session()."""
+    if process:
+        _cleanup_process(process)
+
+
+def detect_exit_ip_and_headers(socks_port: int) -> tuple:
+    """Public wrapper: detect exit IP and capture response headers.
+
+    Returns (exit_ip: str | None, response_headers: dict).
+    """
+    return _detect_exit_ip_and_headers(socks_port)
+
+
+def _cleanup_process(process: subprocess.Popen) -> None:
+    """Terminate process and delete its temp config file."""
+    config_file = getattr(process, "_config_file", None)
+    try:
+        process.terminate()
+        process.wait(timeout=5)
+    except Exception:
+        try:
+            process.kill()
+        except Exception:
+            pass
+    if config_file and os.path.exists(config_file):
+        try:
+            os.unlink(config_file)
+        except Exception:
+            pass
 
 
 def _start_xray_process(xray_path: str, config_path: str) -> subprocess.Popen:

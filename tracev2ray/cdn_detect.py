@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from . import constants
 from .config_parser import ConfigInfo
 from .dns_resolver import DnsResult
-from .geo_lookup import GeoInfo
+from .geo_lookup import GeoInfo, cidr_isp_lookup
 
 
 @dataclass
@@ -85,10 +85,13 @@ def detect_cdn(
     # 8. Reality protocol
     _check_reality(config, result)
 
-    # 9. Server in Iran
+    # 9. Server in Iran (multi-signal: geo + CIDR + ASN + .ir TLD + host header)
     _check_server_in_iran(config, geo_data, result)
 
-    # 10. Classify routing pattern
+    # 10. .ir TLD / known Iranian decoy on host header
+    _check_iranian_decoy(config, result)
+
+    # 11. Classify routing pattern (uses entry!=exit signal from connection_test)
     _classify_routing_pattern(config, result, connection_test)
 
     # Determine confidence
@@ -312,30 +315,89 @@ def _check_reality(config: ConfigInfo, result: CdnInfo):
 
 
 def _check_server_in_iran(config: ConfigInfo, geo_data: dict, result: CdnInfo):
-    """Check if the server IP is located in Iran (relay indicator)."""
-    server_geo = _find_server_geo(config, geo_data)
-    if not server_geo:
-        return
+    """Check if the server IP is located in Iran.
 
-    is_iran = (
-        server_geo.country_code == "IR"
-        or server_geo.asn in constants.IRANIAN_ISPS
-    )
+    Uses three independent signals:
+    1. Geo API country code == IR
+    2. ASN in known Iranian ISP list
+    3. CIDR offline range check (works even when geo API is down)
+    """
+    server_geo = _find_server_geo(config, geo_data)
+    server_ip = config.server_host if config.host_is_ip else ""
+    if not server_ip and server_geo:
+        server_ip = server_geo.ip
+
+    is_iran = False
+    isp_name = "Unknown ISP"
+
+    if server_geo:
+        if server_geo.country_code == "IR":
+            is_iran = True
+            isp_name = server_geo.org or server_geo.isp or "Iranian ISP"
+        if server_geo.asn and server_geo.asn in constants.IRANIAN_ISPS:
+            is_iran = True
+            isp_name = constants.IRANIAN_ISPS[server_geo.asn]
+
+    # CIDR offline check — reliable even when geo API returns nothing
+    if server_ip and not is_iran:
+        cidr_isp = cidr_isp_lookup(server_ip)
+        if cidr_isp:
+            is_iran = True
+            isp_name = cidr_isp
+
     if is_iran:
         result.server_is_iran = True
-        isp_name = constants.IRANIAN_ISPS.get(
-            server_geo.asn, server_geo.org or "Unknown ISP"
-        )
         result.indicators.append(
-            f"Server IP {server_geo.ip} is in Iran ({isp_name}) - "
+            f"Server IP {server_ip or 'unknown'} is in Iran ({isp_name}) — "
             f"this is a relay/tunnel entry point"
         )
 
 
+def _check_iranian_decoy(config: ConfigInfo, result: CdnInfo):
+    """Detect Iranian decoy hostnames in host header, including .ir TLD auto-detection."""
+    host = config.host_header or ""
+    if not host or host == config.server_host:
+        return
+
+    host_lower = host.lower()
+
+    # Known Iranian decoy sites
+    if host_lower in constants.IRANIAN_DECOY_HOSTS:
+        result.indicators.append(
+            f"Host header '{host}' is a known Iranian decoy/popular site "
+            f"(HTTP header obfuscation for censorship bypass)"
+        )
+        return
+
+    # Any .ir TLD domain is almost certainly an Iranian decoy
+    if host_lower.endswith(".ir"):
+        result.indicators.append(
+            f"Host header '{host}' uses .ir TLD — very likely an Iranian decoy site "
+            f"(HTTP header obfuscation for censorship bypass)"
+        )
+
+
 def _classify_routing_pattern(config: ConfigInfo, result: CdnInfo, connection_test=None):
-    """Classify the overall routing pattern and build the routing chain."""
+    """Classify the overall routing pattern and build the routing chain.
+
+    Key signals (in priority order):
+    - Reality protocol
+    - Cloudflare serverless
+    - Server in Iran (relay)
+    - CDN fronting
+    - entry_ip != exit_ip (proven relay/forwarding even without other signals)
+    - Direct connection
+    """
     chain = ["Your PC"]
     RP = constants.RoutingPattern
+
+    # Check if connection test proves relay (entry != exit)
+    entry_exit_differ = False
+    if connection_test and getattr(connection_test, "success", False):
+        entry_ip = getattr(connection_test, "entry_ip", "")
+        exit_ip = getattr(connection_test, "exit_ip", "")
+        if entry_ip and exit_ip and entry_ip != exit_ip:
+            entry_exit_differ = True
 
     # Reality protocol
     if result.is_reality:
@@ -409,6 +471,21 @@ def _classify_routing_pattern(config: ConfigInfo, result: CdnInfo, connection_te
         chain.append(f"Origin Server ({config.server_host})")
         chain.append("Internet")
         result.routing_chain = chain
+        return
+
+    # Connection test proves relay even though we couldn't identify the CDN
+    if entry_exit_differ:
+        result.routing_pattern = RP.IP_FORWARDING_RELAY.value
+        result.is_relay = True
+        chain.append(f"Entry Server ({config.server_host})")
+        chain.append("Relay/Forwarding Layer")
+        chain.append("Exit Server")
+        chain.append("Internet")
+        result.routing_chain = chain
+        result.indicators.append(
+            f"Connection test shows entry IP differs from exit IP — "
+            f"traffic is forwarded through at least one relay layer"
+        )
         return
 
     # Direct connection (default)
